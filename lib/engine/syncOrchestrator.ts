@@ -3,6 +3,7 @@ import { syncJobs, customers, transactions } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { createConnector } from '@/lib/connectors'
 import { normalizeCustomer, normalizeTransaction } from '@/lib/normalization/normalize'
+import { evaluateAlerts } from '@/lib/alerts/evaluator'
 import type { Platform, UnifiedCustomer, UnifiedTransaction } from '@/types'
 
 export interface SyncOptions {
@@ -78,6 +79,12 @@ export async function runSync(
         errorDetails: errors,
       })
       .where(eq(syncJobs.id, jobId))
+
+    try {
+      await evaluateAlerts()
+    } catch (err) {
+      console.error(`[alerts] Evaluation failed after job ${jobId}:`, err)
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await db
