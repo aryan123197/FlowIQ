@@ -18,7 +18,7 @@ Implementation plan: see `/Users/aryangupta/.claude/plans/data-pipeline-insight-
 
 ### Git
 - Branch: `main`
-- Last commit: Phase 4 complete (Pipeline Builder Backend)
+- Last commit: Phase 5 complete (Analytics Dashboard UI)
 - No GitHub remote yet (local only)
 
 ### What's Built (Phases 1 & 2)
@@ -91,15 +91,18 @@ GET  /api/insights              — Claude-generated insight array
 - `app/api/reports/generate/route.ts` — GET, streams CSV/JSON as a file download
 - Verified end-to-end: created a pipeline (source filtered by platform → filter transform → sink), ran it, confirmed correct row counts at each step via the SSE stream and persisted rows in `pipeline_outputs`.
 
-### Phase 5 — Analytics Dashboard UI
-- `app/providers.tsx`
-- `app/(dashboard)/layout.tsx` — sidebar + topbar shell
-- `app/(dashboard)/analytics/page.tsx`
-- `components/ui/` — button, card, badge, dialog, input, select, table, tabs, tooltip, spinner
-- `components/layout/Sidebar.tsx`, `Topbar.tsx`, `PageShell.tsx`
-- `components/analytics/KpiCard.tsx`, `RevenueChart.tsx`, `PlatformDonut.tsx`
-- `components/analytics/TransactionTable.tsx`, `InsightCard.tsx`, `InsightPanel.tsx`
-- `components/analytics/SyncStatusBanner.tsx` (SSE connected), `DateRangePicker.tsx`
+### Phase 5 — Analytics Dashboard UI ✅ DONE
+- `app/providers.tsx` — wraps the app in a `QueryClientProvider` (see constraint #15 below — `@tanstack/react-query` was added this phase, wasn't previously installed)
+- `app/(dashboard)/layout.tsx` — renders `PageShell`
+- `app/(dashboard)/analytics/page.tsx` — KPIs + charts + table + insights, all client-fetched via React Query, date range filters re-key the metrics/timeseries queries
+- `app/page.tsx` — now redirects to `/analytics` (replaced the default `create-next-app` template page)
+- `components/ui/` — button, card, badge, dialog, input, select, table, tabs, tooltip, spinner. **Hand-built, not shadcn** — no Radix/shadcn CLI in this project, just Tailwind + `class-variance-authority` + the `cn()` helper in `lib/utils.ts` (new file, also added this phase)
+- `components/layout/Sidebar.tsx` (nav links to `/analytics`, `/pipelines`, `/alerts`, `/reports` — only `/analytics` has a page so far, the rest 404 until Phases 6–7), `Topbar.tsx` (renders `SyncStatusBanner`), `PageShell.tsx`
+- `components/analytics/KpiCard.tsx`, `RevenueChart.tsx` (recharts `LineChart`), `PlatformDonut.tsx` (recharts `PieChart`)
+- `components/analytics/TransactionTable.tsx` (`@tanstack/react-table`, paginated against `/api/data/transactions`), `InsightCard.tsx`, `InsightPanel.tsx` (hits `/api/insights`, 5min staleTime since it calls Claude)
+- `components/analytics/SyncStatusBanner.tsx` — polls `/api/sync/status` every 10s via React Query; if the latest job is `pending`/`running`, opens an `EventSource` to `/api/sync/[jobId]/stream` for live updates and invalidates `metrics`/`timeseries`/`sync-status` queries on completion
+- `components/analytics/DateRangePicker.tsx`
+- Verified: `npm run build` clean, `/analytics` registered as a static-shell route, triggered a real shopify sync and confirmed `/api/data/metrics` reflected it (the same endpoint the dashboard calls)
 
 ### Phase 6 — Pipeline Builder UI
 - Install `@xyflow/react`
@@ -170,6 +173,9 @@ npm run test         # Vitest
 12. **CSV transactions bypass `normalizeTransaction()`** — `CSVConnector.fetchTransactions()` already yields fully-formed `UnifiedTransaction` objects (column aliasing, Zod validation, status mapping all happen inside the connector). `syncOrchestrator.ts` special-cases `platform === 'csv'` to skip the redundant re-normalize step. Don't "fix" this by routing CSV back through `normalizeTransaction` — `csvRowToUnifiedTransaction` expects a raw-row shape (`row.date` as string) and will throw "Invalid time value" against the connector's already-unified shape (`transactionDate` as Date). The adapter function itself is now unused dead code in the sync path, left in place — only touch it if asked.
 13. **Pipeline graphs use React Flow's native shape** — `{ nodes: [{id, type, data, position?}], edges: [{id, source, target}] }`, validated via Zod in `app/api/pipelines/route.ts`. No translation layer between the (not-yet-built) UI and the backend.
 14. **Sink nodes persist to `pipelineOutputs`, not `transactions`** — `stepExecutor.ts`'s `sink` case inserts each output row into the `pipeline_outputs` table (`runId`, `nodeId`, `row` jsonb), then passes rows through unchanged so step metadata still reflects them. This was a deliberate decision (asked the user) to avoid a misconfigured pipeline silently corrupting the source-of-truth `transactions` table.
+15. **`@tanstack/react-query` is now a dependency** — added in Phase 5 (wasn't in the original plan/package.json) because no data-fetching library existed and the user chose it over plain `useEffect`/`fetch`. `app/providers.tsx` sets up one `QueryClient` per app instance with `staleTime: 30s` and `refetchOnWindowFocus: false` as sane dashboard defaults — override per-query (e.g. `InsightPanel` uses 5min staleTime since `/api/insights` calls Claude).
+16. **`components/ui/` is hand-built, not shadcn** — no `components.json`, no Radix deps. Don't run the shadcn CLI against this project or assume Radix primitives exist; primitives are plain Tailwind + `class-variance-authority` (already installed) + `cn()` in `lib/utils.ts`.
+17. **Recurring `node_modules` corruption** — periodically, stray duplicate folders appear (e.g. `@types/pg 3`, `react 3`) causing `npm run build` to fail TypeScript with "Cannot find type definition file for 'X 3'". Root cause still unconfirmed (suspect a filesystem sync tool). Fix is always: confirm `package-lock.json` diff is clean (or only contains your intended dependency changes) via `git diff package-lock.json`, then `rm -rf node_modules && npm install`. This has now happened twice (Phase 3→4 transition, Phase 4→5 transition) — if it recurs again, worth investigating the actual root cause (e.g. iCloud/Dropbox sync on this directory) rather than just re-fixing it each time.
 
 ---
 
@@ -235,4 +241,4 @@ In priority order:
 
 ## Next Session Should Start With
 
-**Phase 5 — Analytics Dashboard UI.** Begin with `app/providers.tsx` and the `components/ui/` primitives, then the dashboard layout shell, then the analytics page and its components.
+**Phase 6 — Pipeline Builder UI.** Install `@xyflow/react`, then build `PipelineCanvas.tsx` and the node/panel components, then the pipeline list and builder pages.
