@@ -56,7 +56,10 @@ export async function runSync(
     for await (const batch of connector.fetchTransactions()) {
       for (const raw of batch) {
         try {
-          const unified = normalizeTransaction(platform, raw as Record<string, unknown>)
+          // CSVConnector already yields fully-normalized UnifiedTransaction records
+          const unified = platform === 'csv'
+            ? (raw as unknown as UnifiedTransaction)
+            : normalizeTransaction(platform, raw as Record<string, unknown>)
           await upsertTransaction(unified)
           recordsProcessed++
         } catch (err) {
@@ -125,11 +128,26 @@ async function upsertCustomer(c: UnifiedCustomer): Promise<void> {
     })
 }
 
+async function resolveCustomerId(t: UnifiedTransaction): Promise<string | null> {
+  if (t.customerId) return t.customerId
+  if (!t.customerEmail) return null
+
+  const [customer] = await db
+    .select({ id: customers.id })
+    .from(customers)
+    .where(eq(customers.email, t.customerEmail))
+    .limit(1)
+
+  return customer?.id ?? null
+}
+
 async function upsertTransaction(t: UnifiedTransaction): Promise<void> {
+  const customerId = await resolveCustomerId(t)
+
   await db
     .insert(transactions)
     .values({
-      customerId: t.customerId ?? null,
+      customerId,
       sourcePlatform: t.sourcePlatform,
       sourceTransactionId: t.sourceTransactionId,
       amount: t.amount,
@@ -141,6 +159,7 @@ async function upsertTransaction(t: UnifiedTransaction): Promise<void> {
     .onConflictDoUpdate({
       target: [transactions.sourcePlatform, transactions.sourceTransactionId],
       set: {
+        customerId,
         amount: t.amount,
         currency: t.currency,
         status: t.status,

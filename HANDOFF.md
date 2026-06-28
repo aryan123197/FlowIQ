@@ -169,6 +169,26 @@ npm run test         # Vitest
 8. **SSE via `createSSEStream()` in `lib/sse/emitter.ts`** — all SSE routes use this factory
 9. **Drizzle `and()` with undefined filters** — pass `undefined` not empty conditions array to avoid SQL errors; use spread: `and(...conditions)` where conditions may be empty — test this carefully
 10. **Claude model**: always use `claude-sonnet-4-6` (not claude-3, not opus)
+11. **`transactions.customerId` is resolved in `syncOrchestrator.ts`'s `resolveCustomerId()`** — looks up by `customerEmail` against `customers.email` at upsert time. Don't expect adapters/connectors to set it directly (only Salesforce's adapter signature accepts a pre-resolved id, but nothing upstream ever passed one — the orchestrator is the single source of truth now)
+12. **CSV transactions bypass `normalizeTransaction()`** — `CSVConnector.fetchTransactions()` already yields fully-formed `UnifiedTransaction` objects (column aliasing, Zod validation, status mapping all happen inside the connector). `syncOrchestrator.ts` special-cases `platform === 'csv'` to skip the redundant re-normalize step. Don't "fix" this by routing CSV back through `normalizeTransaction` — `csvRowToUnifiedTransaction` expects a raw-row shape (`row.date` as string) and will throw "Invalid time value" against the connector's already-unified shape (`transactionDate` as Date). The adapter function itself is now unused dead code in the sync path, left in place — only touch it if asked.
+
+---
+
+## Test Suite (Phases 1–3)
+
+Added a Vitest suite (46 tests, all passing) covering Phases 1–3 against the real local Postgres DB (no mocking of DB/SQL — only `fetch` is mocked in alert dispatcher tests). Run with `npm run test`.
+
+- `test/setup.ts` — truncates all relevant tables before/after each test for isolation
+- `test/normalization.test.ts` — pure adapter functions (stripe/shopify/salesforce/csv → UnifiedCustomer/UnifiedTransaction), status mapping tables, cents conversion, currency lowercasing
+- `test/syncOrchestrator.test.ts` — full `runSync()` runs against mock connectors: record counts, idempotency (run twice → no dupes), customerId resolution, CSV partial-failure handling, CSV error-rate threshold failure
+- `test/insightTools.test.ts` — all 6 insight SQL tools against seeded data with hand-computed expected values
+- `test/alerts.test.ts` — `metricCalculator`, `evaluateAlerts()` (breach → trigger, dedup while unresolved, auto-resolve, disabled rules skipped, dispatch failure doesn't block trigger creation)
+
+**`vitest.config.ts` has `fileParallelism: false`** — required because all test files share one real Postgres DB and `beforeEach` truncates tables; running files in parallel processes causes cross-file truncation races. Don't remove this without giving each file its own schema/transaction isolation.
+
+### Two real bugs found and fixed while writing these tests
+1. **`transactions.customerId` was always `null`** — no platform ever resolved it before upsert, so `getTopCustomers()` always returned an empty list. Fixed via `resolveCustomerId()` in `syncOrchestrator.ts` (see constraint #11 above).
+2. **CSV uploads always failed** — every CSV row threw "Invalid time value" because of the double-normalization bug (see constraint #12 above). This means CSV upload has likely never worked correctly until this fix.
 
 ---
 
