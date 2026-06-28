@@ -116,7 +116,16 @@ export const transformRules = pgTable('transform_rules', {
   orderIndex: integer('order_index').notNull().default(0),
 })
 
+export const pipelineOutputs = pgTable('pipeline_outputs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  runId: uuid('run_id').notNull().references(() => pipelineRuns.id, { onDelete: 'cascade' }),
+  nodeId: varchar('node_id', { length: 100 }).notNull(),
+  row: jsonb('row').$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
 export type Pipeline = typeof pipelines.$inferSelect
 export type PipelineRun = typeof pipelineRuns.$inferSelect
 export type PipelineStep = typeof pipelineSteps.$inferSelect
 export type TransformRule = typeof transformRules.$inferSelect
+export type PipelineOutput = typeof pipelineOutputs.$inferSelect

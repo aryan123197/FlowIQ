@@ -18,15 +18,15 @@ Implementation plan: see `/Users/aryangupta/.claude/plans/data-pipeline-insight-
 
 ### Git
 - Branch: `main`
-- Last commit: Phase 3 complete (Alert Engine)
+- Last commit: Phase 4 complete (Pipeline Builder Backend)
 - No GitHub remote yet (local only)
 
 ### What's Built (Phases 1 & 2)
 
 **Database** — PostgreSQL 16, local at `localhost:5432/enterprise_data`
-- 9 tables migrated: customers, transactions, syncJobs, alertRules, alertTriggers, pipelines, pipelineRuns, pipelineSteps, transformRules
+- 10 tables migrated: customers, transactions, syncJobs, alertRules, alertTriggers, pipelines, pipelineRuns, pipelineSteps, transformRules, pipelineOutputs
 - Schema: `lib/db/schema.ts`
-- Migration file: `lib/db/migrations/0000_curved_stature.sql`
+- Migration files: `lib/db/migrations/0000_curved_stature.sql`, `0001_rainy_captain_flint.sql`
 
 **ETL Engine**
 - `lib/connectors/index.ts` — factory: `createConnector(platform, config)`
@@ -77,22 +77,19 @@ GET  /api/insights              — Claude-generated insight array
 - `app/api/alerts/triggers/route.ts` — GET trigger history (optional `?ruleId=` filter)
 - Verified end-to-end: created a rule, triggered a sync, confirmed trigger row was inserted and dispatch failure was caught/logged without crashing the sync.
 
-### Phase 4 — Pipeline Builder Backend
-Files to create:
-- `lib/transforms/filter.ts` — safe expression evaluator (hand-written tokenizer, NO eval())
-- `lib/transforms/rename.ts` — column rename map
-- `lib/transforms/cast.ts` — type coercion
-- `lib/transforms/derive.ts` — computed columns
-- `lib/transforms/dedupe.ts` — deduplication by key fields
-- `lib/engine/transformRegistry.ts` — maps ruleType → transform function
-- `lib/engine/pipelineRunner.ts` — Kahn's topological sort + step execution
-- `lib/engine/stepExecutor.ts` — routes node type to handler
-- `app/api/pipelines/route.ts` — GET + POST
+### Phase 4 — Pipeline Builder Backend ✅ DONE
+- `lib/transforms/filter.ts` — hand-written tokenizer/parser for expressions like `"amount > 1000 AND status == 'completed'"`. No `eval()`/`new Function()`. Mixing AND/OR in one expression throws (no parens support).
+- `lib/transforms/rename.ts`, `cast.ts`, `derive.ts`, `dedupe.ts` — column rename, type coercion, computed columns, dedup by key fields
+- `lib/engine/transformRegistry.ts` — maps `ruleType` → transform function, `runTransform()` helper
+- `lib/engine/pipelineRunner.ts` — Kahn's topological sort (throws on cycles / dangling edges), executes nodes in order, records `pipelineSteps` per node, marks run/step `failed` and rethrows on any node error
+- `lib/engine/stepExecutor.ts` — `executeNode(node, inputRows, runId)`: `source` reads from `transactions` (optionally filtered by `platform`), `transform` calls the registry, `sink` writes rows into `pipelineOutputs` (see constraint #13) and passes rows through unchanged
+- `app/api/pipelines/route.ts` — GET list + POST create (Zod-validated against React Flow's native graph shape)
 - `app/api/pipelines/[id]/route.ts` — GET + PUT + DELETE
-- `app/api/pipelines/[id]/run/route.ts` — POST → execute pipeline
-- `app/api/pipelines/[id]/stream/route.ts` — SSE step-by-step status
-- `app/api/reports/generate/route.ts` — streaming CSV/JSON export
-- `lib/reports/generator.ts` — stream rows from DB
+- `app/api/pipelines/[id]/run/route.ts` — POST → fire-and-forget `runPipeline()`, same pattern as `/api/sync/trigger`
+- `app/api/pipelines/[id]/stream/route.ts` — SSE step-by-step status, polls `pipelineRuns`/`pipelineSteps`, same pattern as `/api/sync/[jobId]/stream`
+- `lib/reports/generator.ts` — `generateReportStream()`, batches `transactions` rows (500/batch) into a CSV or JSON `ReadableStream`
+- `app/api/reports/generate/route.ts` — GET, streams CSV/JSON as a file download
+- Verified end-to-end: created a pipeline (source filtered by platform → filter transform → sink), ran it, confirmed correct row counts at each step via the SSE stream and persisted rows in `pipeline_outputs`.
 
 ### Phase 5 — Analytics Dashboard UI
 - `app/providers.tsx`
@@ -171,18 +168,22 @@ npm run test         # Vitest
 10. **Claude model**: always use `claude-sonnet-4-6` (not claude-3, not opus)
 11. **`transactions.customerId` is resolved in `syncOrchestrator.ts`'s `resolveCustomerId()`** — looks up by `customerEmail` against `customers.email` at upsert time. Don't expect adapters/connectors to set it directly (only Salesforce's adapter signature accepts a pre-resolved id, but nothing upstream ever passed one — the orchestrator is the single source of truth now)
 12. **CSV transactions bypass `normalizeTransaction()`** — `CSVConnector.fetchTransactions()` already yields fully-formed `UnifiedTransaction` objects (column aliasing, Zod validation, status mapping all happen inside the connector). `syncOrchestrator.ts` special-cases `platform === 'csv'` to skip the redundant re-normalize step. Don't "fix" this by routing CSV back through `normalizeTransaction` — `csvRowToUnifiedTransaction` expects a raw-row shape (`row.date` as string) and will throw "Invalid time value" against the connector's already-unified shape (`transactionDate` as Date). The adapter function itself is now unused dead code in the sync path, left in place — only touch it if asked.
+13. **Pipeline graphs use React Flow's native shape** — `{ nodes: [{id, type, data, position?}], edges: [{id, source, target}] }`, validated via Zod in `app/api/pipelines/route.ts`. No translation layer between the (not-yet-built) UI and the backend.
+14. **Sink nodes persist to `pipelineOutputs`, not `transactions`** — `stepExecutor.ts`'s `sink` case inserts each output row into the `pipeline_outputs` table (`runId`, `nodeId`, `row` jsonb), then passes rows through unchanged so step metadata still reflects them. This was a deliberate decision (asked the user) to avoid a misconfigured pipeline silently corrupting the source-of-truth `transactions` table.
 
 ---
 
-## Test Suite (Phases 1–3)
+## Test Suite (Phases 1–4)
 
-Added a Vitest suite (46 tests, all passing) covering Phases 1–3 against the real local Postgres DB (no mocking of DB/SQL — only `fetch` is mocked in alert dispatcher tests). Run with `npm run test`.
+Added a Vitest suite (69 tests, all passing) covering Phases 1–4 against the real local Postgres DB (no mocking of DB/SQL — only `fetch` is mocked in alert dispatcher tests). Run with `npm run test`.
 
 - `test/setup.ts` — truncates all relevant tables before/after each test for isolation
 - `test/normalization.test.ts` — pure adapter functions (stripe/shopify/salesforce/csv → UnifiedCustomer/UnifiedTransaction), status mapping tables, cents conversion, currency lowercasing
 - `test/syncOrchestrator.test.ts` — full `runSync()` runs against mock connectors: record counts, idempotency (run twice → no dupes), customerId resolution, CSV partial-failure handling, CSV error-rate threshold failure
 - `test/insightTools.test.ts` — all 6 insight SQL tools against seeded data with hand-computed expected values
 - `test/alerts.test.ts` — `metricCalculator`, `evaluateAlerts()` (breach → trigger, dedup while unresolved, auto-resolve, disabled rules skipped, dispatch failure doesn't block trigger creation)
+- `test/transforms.test.ts` — all 5 transform functions, including filter expression parsing edge cases (AND/OR, mixed AND/OR rejection, malformed expressions)
+- `test/pipelineRunner.test.ts` — full `runPipeline()` integration tests against real DB: source/transform/sink wiring, platform filtering, multi-step transform chains, cycle detection, failure propagation, `pipelineOutputs` persistence
 
 **`vitest.config.ts` has `fileParallelism: false`** — required because all test files share one real Postgres DB and `beforeEach` truncates tables; running files in parallel processes causes cross-file truncation races. Don't remove this without giving each file its own schema/transaction isolation.
 
@@ -234,4 +235,4 @@ In priority order:
 
 ## Next Session Should Start With
 
-**Phase 4 — Pipeline Builder Backend.** Begin with the transform functions (`lib/transforms/`), then `transformRegistry.ts`, then `pipelineRunner.ts` (topological sort), then `stepExecutor.ts`, then the API routes.
+**Phase 5 — Analytics Dashboard UI.** Begin with `app/providers.tsx` and the `components/ui/` primitives, then the dashboard layout shell, then the analytics page and its components.

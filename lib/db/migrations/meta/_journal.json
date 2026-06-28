@@ -8,6 +8,13 @@
       "when": 1782612222971,
       "tag": "0000_curved_stature",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782631679942,
+      "tag": "0001_rainy_captain_flint",
+      "breakpoints": true
     }
   ]
 }
