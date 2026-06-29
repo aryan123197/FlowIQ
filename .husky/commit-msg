@@ -1,0 +1,3 @@
+# Enforce conventional commit format
+# Valid: feat: ..., fix: ..., docs: ..., chore: ..., refactor: ..., test: ...
+npx --no -- commitlint --edit "$1"

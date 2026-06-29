@@ -11,7 +11,11 @@
     "db:studio": "dotenv -e .env.local -- drizzle-kit studio",
     "db:seed": "tsx lib/db/seed.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "husky",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
@@ -21,6 +25,7 @@
     "@types/nodemailer": "^8.0.0",
     "@types/papaparse": "^5.5.2",
     "@types/pg": "^8.20.0",
+    "@xyflow/react": "^12.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -40,15 +45,28 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0",
     "@esbuild/darwin-arm64": "^0.28.1",
+    "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "dotenv-cli": "^11.0.0",
+    "eslint-config-next": "^16.2.9",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "prettier": "^3.9.1",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "typescript-eslint": "^8.62.0",
     "vitest": "^4.1.6"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,mjs,cjs,json,md,css}": [
+      "prettier --write"
+    ]
   }
 }

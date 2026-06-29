@@ -1,0 +1,7 @@
+# FlowIQ pre-commit hook
+# 1. Run ESLint + Prettier on staged files only (fast)
+npx lint-staged
+
+# 2. TypeScript type check on the whole project
+echo "Running TypeScript check..."
+npm run type-check
