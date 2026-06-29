@@ -30,8 +30,12 @@ export function AlertRuleCard({
         </p>
         <p className="text-xs text-zinc-400">
           {rule.actionType === 'email'
-            ? `Email: ${rule.actionConfig.to}`
-            : `Slack: ${rule.actionConfig.webhookUrl}`}
+            ? rule.actionConfig.to
+              ? `Email: ${rule.actionConfig.to}`
+              : 'Email: not configured'
+            : rule.actionConfig.webhookUrl
+              ? `Slack: ${rule.actionConfig.webhookUrl}`
+              : 'Slack: not configured'}
         </p>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => onToggle(!rule.enabled)}>

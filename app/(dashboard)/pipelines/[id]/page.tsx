@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PipelineCanvas, type PipelineGraph } from '@/components/pipeline/PipelineCanvas'
 import { PipelineToolbar } from '@/components/pipeline/PipelineToolbar'
 import { PipelineRunLog } from '@/components/pipeline/PipelineRunLog'
+import type { TransformNodeData } from '@/components/pipeline/types'
 import type { Node } from '@xyflow/react'
 
 interface Pipeline {
@@ -22,6 +23,10 @@ function nextNodeId(type: string) {
 
 export default function PipelineBuilderPage() {
   const { id } = useParams<{ id: string }>()
+  return <PipelineBuilder key={id} id={id} />
+}
+
+function PipelineBuilder({ id }: { id: string }) {
   const queryClient = useQueryClient()
   const [graph, setGraph] = useState<PipelineGraph | null>(null)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
@@ -32,7 +37,7 @@ export default function PipelineBuilderPage() {
       const res = await fetch(`/api/pipelines/${id}`)
       if (!res.ok) throw new Error('Failed to load pipeline')
       const json = (await res.json()) as Pipeline
-      setGraph(json.graphJson ?? { nodes: [], edges: [] })
+      setGraph((prev) => prev ?? json.graphJson ?? { nodes: [], edges: [] })
       return json
     },
   })
@@ -72,6 +77,10 @@ export default function PipelineBuilderPage() {
     }))
   }, [])
 
+  const hasUnconfiguredTransform = graph?.nodes.some(
+    (n) => n.type === 'transform' && !(n.data as TransformNodeData)?.ruleType
+  )
+
   const handleSettled = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['pipeline-runs', id] })
   }, [id, queryClient])
@@ -96,6 +105,7 @@ export default function PipelineBuilderPage() {
         onRun={() => runMutation.mutate()}
         saving={saveMutation.isPending}
         running={runMutation.isPending}
+        runDisabled={hasUnconfiguredTransform}
       />
 
       <div className="flex-1">

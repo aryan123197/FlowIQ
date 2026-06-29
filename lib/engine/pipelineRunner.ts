@@ -51,10 +51,19 @@ function topologicalSort(graph: PipelineGraph): GraphNode[] {
   return sorted
 }
 
+function validateGraph(graph: PipelineGraph): void {
+  for (const node of graph.nodes) {
+    if (node.type === 'transform' && !node.data.ruleType) {
+      throw new Error(`Transform node ${node.id} is not configured — no rule type selected`)
+    }
+  }
+}
+
 export async function runPipeline(runId: string, graph: PipelineGraph): Promise<void> {
   try {
     await db.update(pipelineRuns).set({ status: 'running' }).where(eq(pipelineRuns.id, runId))
 
+    validateGraph(graph)
     const sortedNodes = topologicalSort(graph)
 
     const stepRows = await db
@@ -110,7 +119,10 @@ export async function runPipeline(runId: string, graph: PipelineGraph): Promise<
       }
     }
 
-    await db.update(pipelineRuns).set({ status: 'completed', completedAt: new Date() }).where(eq(pipelineRuns.id, runId))
+    await db
+      .update(pipelineRuns)
+      .set({ status: 'completed', completedAt: new Date() })
+      .where(eq(pipelineRuns.id, runId))
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await db
