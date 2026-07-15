@@ -2,11 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, GitBranch, Bell, FileDown, Sparkles } from 'lucide-react'
+import { BarChart3, GitBranch, Bell, FileDown, Sparkles, Upload } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+  { href: '/import', label: 'Import Data', icon: Upload },
   { href: '/pipelines', label: 'Pipelines', icon: GitBranch },
   { href: '/alerts', label: 'Alerts', icon: Bell },
   { href: '/reports', label: 'Reports', icon: FileDown },

@@ -162,8 +162,36 @@ export default function NlSqlPage() {
 
       {result && (
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Results ({result.rows.length} rows)</CardTitle>
+            <button
+              type="button"
+              onClick={() => {
+                const header = result.columns.join(',')
+                const body = result.rows
+                  .map((row) =>
+                    result.columns
+                      .map((col) => {
+                        const v = String(row[col] ?? '')
+                        return v.includes(',') || v.includes('"') || v.includes('\n')
+                          ? `"${v.replace(/"/g, '""')}"`
+                          : v
+                      })
+                      .join(',')
+                  )
+                  .join('\n')
+                const blob = new Blob([header + '\n' + body], { type: 'text/csv' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = 'query-results.csv'
+                a.click()
+                URL.revokeObjectURL(url)
+              }}
+              className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              Download CSV
+            </button>
           </CardHeader>
           <CardContent>
             <Table>
