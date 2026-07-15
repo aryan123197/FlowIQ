@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
-import { transactions } from '@/lib/db/schema'
+import { goldMetricsDaily } from '@/lib/db/schema'
 import { sql, and, gte, lte } from 'drizzle-orm'
 
 export async function GET(req: NextRequest) {
@@ -11,28 +11,30 @@ export async function GET(req: NextRequest) {
 
   const truncFn = granularity === 'month' ? 'month' : granularity === 'week' ? 'week' : 'day'
 
-  const conditions = [sql`${transactions.status} = 'completed'`]
-  if (dateFrom) conditions.push(gte(transactions.transactionDate, new Date(dateFrom)))
-  if (dateTo) conditions.push(lte(transactions.transactionDate, new Date(dateTo)))
+  const conditions = []
+  if (dateFrom) conditions.push(gte(goldMetricsDaily.date, dateFrom))
+  if (dateTo) conditions.push(lte(goldMetricsDaily.date, dateTo))
 
+  // Roll up gold rows to the requested granularity
   const rows = await db
     .select({
-      date: sql<string>`DATE_TRUNC('${sql.raw(truncFn)}', ${transactions.transactionDate})::date::text`,
-      platform: transactions.sourcePlatform,
-      revenue: sql<number>`COALESCE(SUM(${transactions.amount}), 0)::int`,
+      date: sql<string>`DATE_TRUNC('${sql.raw(truncFn)}', ${goldMetricsDaily.date}::date)::date::text`,
+      platform: goldMetricsDaily.platform,
+      revenue: sql<number>`SUM(${goldMetricsDaily.totalRevenue})::int`,
     })
-    .from(transactions)
+    .from(goldMetricsDaily)
     .where(and(...conditions))
     .groupBy(
-      sql`DATE_TRUNC('${sql.raw(truncFn)}', ${transactions.transactionDate})`,
-      transactions.sourcePlatform
+      sql`DATE_TRUNC('${sql.raw(truncFn)}', ${goldMetricsDaily.date}::date)`,
+      goldMetricsDaily.platform
     )
-    .orderBy(sql`DATE_TRUNC('${sql.raw(truncFn)}', ${transactions.transactionDate})`)
+    .orderBy(sql`DATE_TRUNC('${sql.raw(truncFn)}', ${goldMetricsDaily.date}::date)`)
 
   // Pivot: group by date, spread platforms as keys
   const byDate = new Map<string, Record<string, number>>()
   for (const row of rows) {
-    if (!byDate.has(row.date)) byDate.set(row.date, { stripe: 0, shopify: 0, salesforce: 0, csv: 0 })
+    if (!byDate.has(row.date))
+      byDate.set(row.date, { stripe: 0, shopify: 0, salesforce: 0, csv: 0 })
     byDate.get(row.date)![row.platform] = Number(row.revenue)
   }
 

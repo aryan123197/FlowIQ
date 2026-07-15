@@ -110,6 +110,45 @@ export const csvUploads = pgTable('csv_uploads', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
+// ---------------------------------------------------------------------------
+// Bronze layer — raw event store (pre-normalization)
+// ---------------------------------------------------------------------------
+export const bronzeEvents = pgTable(
+  'bronze_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    syncJobId: uuid('sync_job_id')
+      .notNull()
+      .references(() => syncJobs.id, { onDelete: 'cascade' }),
+    platform: platformEnum('platform').notNull(),
+    eventType: varchar('event_type', { length: 100 }).notNull(),
+    sourceId: varchar('source_id', { length: 255 }),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    ingestedAt: timestamp('ingested_at').defaultNow().notNull(),
+  },
+  (t) => [unique('uniq_bronze_platform_source').on(t.platform, t.sourceId)]
+)
+
+// ---------------------------------------------------------------------------
+// Gold layer — pre-aggregated daily metrics
+// ---------------------------------------------------------------------------
+export const goldMetricsDaily = pgTable(
+  'gold_metrics_daily',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    date: varchar('date', { length: 10 }).notNull(),
+    platform: platformEnum('platform').notNull(),
+    totalRevenue: integer('total_revenue').notNull().default(0),
+    transactionCount: integer('transaction_count').notNull().default(0),
+    failedCount: integer('failed_count').notNull().default(0),
+    refreshedAt: timestamp('refreshed_at').defaultNow().notNull(),
+  },
+  (t) => [unique('uniq_gold_date_platform').on(t.date, t.platform)]
+)
+
+export type BronzeEvent = typeof bronzeEvents.$inferSelect
+export type GoldMetricsDaily = typeof goldMetricsDaily.$inferSelect
+
 export type Customer = typeof customers.$inferSelect
 export type NewCustomer = typeof customers.$inferInsert
 export type Transaction = typeof transactions.$inferSelect

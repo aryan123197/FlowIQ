@@ -4,6 +4,8 @@ import { eq, inArray, sql } from 'drizzle-orm'
 import { createConnector } from '@/lib/connectors'
 import { normalizeCustomer, normalizeTransaction } from '@/lib/normalization/normalize'
 import { evaluateAlerts } from '@/lib/alerts/evaluator'
+import { writeBronze } from '@/lib/medallion/bronze'
+import { refreshGold } from '@/lib/medallion/gold'
 import type { CSVConnector } from '@/lib/connectors/csv'
 import type { Platform, UnifiedCustomer, UnifiedTransaction } from '@/types'
 
@@ -43,6 +45,17 @@ export async function runSync(
     // --- Sync customers (not applicable for CSV) ---
     if (platform !== 'csv') {
       for await (const batch of connector.fetchCustomers()) {
+        // Bronze: persist raw customer records before normalization
+        await writeBronze(
+          jobId,
+          platform,
+          batch.map((raw) => ({
+            eventType: 'customer',
+            sourceId: (raw as Record<string, unknown>).id as string | undefined,
+            payload: raw as Record<string, unknown>,
+          }))
+        )
+
         const unified: UnifiedCustomer[] = []
         for (const raw of batch) {
           try {
@@ -61,6 +74,17 @@ export async function runSync(
 
     // --- Sync transactions ---
     for await (const batch of connector.fetchTransactions()) {
+      // Bronze: persist raw transaction records before normalization
+      await writeBronze(
+        jobId,
+        platform,
+        batch.map((raw) => ({
+          eventType: 'transaction',
+          sourceId: (raw as Record<string, unknown>).id as string | undefined,
+          payload: raw as Record<string, unknown>,
+        }))
+      )
+
       const unified: UnifiedTransaction[] = []
       for (const raw of batch) {
         try {
@@ -96,6 +120,11 @@ export async function runSync(
         errorDetails: errors,
       })
       .where(eq(syncJobs.id, jobId))
+
+    // Gold: refresh daily aggregates from the updated silver layer
+    refreshGold().catch((err) => {
+      console.error(`[gold] Refresh failed after job ${jobId}:`, err)
+    })
 
     evaluateAlerts().catch((err) => {
       console.error(`[alerts] Evaluation failed after job ${jobId}:`, err)
