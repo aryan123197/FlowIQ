@@ -15,6 +15,13 @@
       "when": 1782631679942,
       "tag": "0001_rainy_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782707908870,
+      "tag": "0002_nostalgic_carnage",
+      "breakpoints": true
     }
   ]
 }

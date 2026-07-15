@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.env*
+npm-debug.log*
+coverage
+test
+README.md
+HANDOFF.md
+ARCHITECTURE.md
+REQUIREMENTS.md

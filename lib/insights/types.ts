@@ -1,5 +1,12 @@
 export type InsightSeverity = 'critical' | 'warning' | 'info'
-export type InsightType = 'trend' | 'anomaly' | 'period_comparison' | 'top_customers' | 'failure_rate' | 'platform_breakdown'
+export type InsightType =
+  | 'trend'
+  | 'anomaly'
+  | 'period_comparison'
+  | 'top_customers'
+  | 'failure_rate'
+  | 'platform_breakdown'
+  | 'csv_quality'
 
 export interface Insight {
   id: string
@@ -8,15 +15,15 @@ export interface Insight {
   title: string
   description: string
   value?: number
-  delta?: number       // percentage change
+  delta?: number // percentage change
   recommendation: string
-  generatedAt: string  // ISO string
+  generatedAt: string // ISO string
 }
 
 export interface RevenueTrendResult {
   buckets: { date: string; revenue: number }[]
-  slope: number           // dollars per day
-  percentChange: number   // % change first→last bucket
+  slope: number // dollars per day
+  percentChange: number // % change first→last bucket
   totalRevenue: number
 }
 
@@ -39,13 +46,30 @@ export interface TopCustomersResult {
 }
 
 export interface FailureRateResult {
-  currentRate: number     // 0-1
-  rollingAvgRate: number  // 0-1
-  ratio: number           // currentRate / rollingAvgRate
+  currentRate: number // 0-1
+  rollingAvgRate: number // 0-1
+  ratio: number // currentRate / rollingAvgRate
   windowHours: number
 }
 
 export interface PlatformBreakdownResult {
   platforms: { platform: string; revenue: number; count: number; sharePercent: number }[]
   totalRevenue: number
+}
+
+export interface CsvQualityResult {
+  uploads: {
+    filename: string
+    uploadedAt: string
+    headers: string[]
+    totalRows: number
+    errorRows: number
+    errorRate: number
+    sampleErrorRows: { row: Record<string, unknown>; reason: string }[]
+  }[]
+}
+
+export interface TimeseriesResult {
+  rows: { date: string; platform: string; revenue: number }[]
+  days: number
 }

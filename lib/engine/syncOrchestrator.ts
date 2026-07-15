@@ -1,13 +1,20 @@
 import { db } from '@/lib/db/client'
-import { syncJobs, customers, transactions } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { syncJobs, customers, transactions, csvUploads } from '@/lib/db/schema'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { createConnector } from '@/lib/connectors'
 import { normalizeCustomer, normalizeTransaction } from '@/lib/normalization/normalize'
 import { evaluateAlerts } from '@/lib/alerts/evaluator'
+import type { CSVConnector } from '@/lib/connectors/csv'
 import type { Platform, UnifiedCustomer, UnifiedTransaction } from '@/types'
 
 export interface SyncOptions {
   csvContent?: string
+  filename?: string
+}
+
+interface BatchOutcome {
+  processed: number
+  errors: Array<{ message: string; record?: unknown }>
 }
 
 export async function runSync(
@@ -18,12 +25,11 @@ export async function runSync(
   const errors: Array<{ message: string; record?: unknown }> = []
   let recordsProcessed = 0
   let errorCount = 0
+  let csvConnector: CSVConnector | undefined
+  let csvSummaryPersisted = false
 
   try {
-    await db
-      .update(syncJobs)
-      .set({ status: 'running' })
-      .where(eq(syncJobs.id, jobId))
+    await db.update(syncJobs).set({ status: 'running' }).where(eq(syncJobs.id, jobId))
 
     const connectorConfig: Record<string, unknown> = {}
     if (platform === 'csv' && options.csvContent) {
@@ -31,45 +37,53 @@ export async function runSync(
     }
 
     const connector = createConnector(platform, connectorConfig)
+    if (platform === 'csv') csvConnector = connector as CSVConnector
     await connector.validate()
 
     // --- Sync customers (not applicable for CSV) ---
     if (platform !== 'csv') {
       for await (const batch of connector.fetchCustomers()) {
+        const unified: UnifiedCustomer[] = []
         for (const raw of batch) {
           try {
-            const unified = normalizeCustomer(platform, raw as Record<string, unknown>)
-            await upsertCustomer(unified)
-            recordsProcessed++
+            unified.push(normalizeCustomer(platform, raw as Record<string, unknown>))
           } catch (err) {
             errorCount++
-            errors.push({
-              message: err instanceof Error ? err.message : String(err),
-              record: raw,
-            })
+            errors.push({ message: err instanceof Error ? err.message : String(err), record: raw })
           }
         }
+        const outcome = await upsertCustomers(unified)
+        recordsProcessed += outcome.processed
+        errorCount += outcome.errors.length
+        errors.push(...outcome.errors)
       }
     }
 
     // --- Sync transactions ---
     for await (const batch of connector.fetchTransactions()) {
+      const unified: UnifiedTransaction[] = []
       for (const raw of batch) {
         try {
           // CSVConnector already yields fully-normalized UnifiedTransaction records
-          const unified = platform === 'csv'
-            ? (raw as unknown as UnifiedTransaction)
-            : normalizeTransaction(platform, raw as Record<string, unknown>)
-          await upsertTransaction(unified)
-          recordsProcessed++
+          unified.push(
+            platform === 'csv'
+              ? (raw as unknown as UnifiedTransaction)
+              : normalizeTransaction(platform, raw as Record<string, unknown>)
+          )
         } catch (err) {
           errorCount++
-          errors.push({
-            message: err instanceof Error ? err.message : String(err),
-            record: raw,
-          })
+          errors.push({ message: err instanceof Error ? err.message : String(err), record: raw })
         }
       }
+      const outcome = await upsertTransactions(unified)
+      recordsProcessed += outcome.processed
+      errorCount += outcome.errors.length
+      errors.push(...outcome.errors)
+    }
+
+    if (csvConnector) {
+      await persistCsvUploadSummary(jobId, csvConnector, options.filename)
+      csvSummaryPersisted = true
     }
 
     await db
@@ -83,13 +97,13 @@ export async function runSync(
       })
       .where(eq(syncJobs.id, jobId))
 
-    try {
-      await evaluateAlerts()
-    } catch (err) {
+    evaluateAlerts().catch((err) => {
       console.error(`[alerts] Evaluation failed after job ${jobId}:`, err)
-    }
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    if (csvConnector && !csvSummaryPersisted)
+      await persistCsvUploadSummary(jobId, csvConnector, options.filename)
     await db
       .update(syncJobs)
       .set({
@@ -104,67 +118,181 @@ export async function runSync(
   }
 }
 
-async function upsertCustomer(c: UnifiedCustomer): Promise<void> {
-  await db
-    .insert(customers)
-    .values({
-      email: c.email,
-      name: c.name ?? null,
-      stripeId: c.stripeId ?? null,
-      shopifyId: c.shopifyId ?? null,
-      salesforceId: c.salesforceId ?? null,
-      attributes: c.attributes ?? {},
-    })
-    .onConflictDoUpdate({
-      target: customers.email,
-      set: {
-        name: c.name ?? null,
-        stripeId: c.stripeId ?? null,
-        shopifyId: c.shopifyId ?? null,
-        salesforceId: c.salesforceId ?? null,
-        attributes: c.attributes ?? {},
-        updatedAt: new Date(),
-      },
-    })
+async function persistCsvUploadSummary(
+  jobId: string,
+  connector: CSVConnector,
+  filename: string | undefined
+): Promise<void> {
+  const summary = connector.getUploadSummary()
+  await db.insert(csvUploads).values({
+    syncJobId: jobId,
+    filename: filename ?? 'upload.csv',
+    headers: summary.headers,
+    totalRows: summary.totalRows,
+    errorRows: summary.errorRows,
+    sampleRows: summary.sampleRows,
+    sampleErrorRows: summary.sampleErrorRows,
+  })
 }
 
-async function resolveCustomerId(t: UnifiedTransaction): Promise<string | null> {
-  if (t.customerId) return t.customerId
-  if (!t.customerEmail) return null
+async function upsertCustomers(batch: UnifiedCustomer[]): Promise<BatchOutcome> {
+  if (batch.length === 0) return { processed: 0, errors: [] }
 
-  const [customer] = await db
-    .select({ id: customers.id })
+  try {
+    await db
+      .insert(customers)
+      .values(
+        batch.map((c) => ({
+          email: c.email,
+          name: c.name ?? null,
+          stripeId: c.stripeId ?? null,
+          shopifyId: c.shopifyId ?? null,
+          salesforceId: c.salesforceId ?? null,
+          attributes: c.attributes ?? {},
+        }))
+      )
+      .onConflictDoUpdate({
+        target: customers.email,
+        set: {
+          name: sql`excluded.name`,
+          stripeId: sql`excluded.stripe_id`,
+          shopifyId: sql`excluded.shopify_id`,
+          salesforceId: sql`excluded.salesforce_id`,
+          attributes: sql`excluded.attributes`,
+          updatedAt: new Date(),
+        },
+      })
+    return { processed: batch.length, errors: [] }
+  } catch {
+    // Bulk statement failed (e.g. one bad row) — fall back to per-row so good rows still land.
+    return upsertCustomersOneByOne(batch)
+  }
+}
+
+async function upsertCustomersOneByOne(batch: UnifiedCustomer[]): Promise<BatchOutcome> {
+  let processed = 0
+  const errors: Array<{ message: string; record?: unknown }> = []
+  for (const c of batch) {
+    try {
+      await db
+        .insert(customers)
+        .values({
+          email: c.email,
+          name: c.name ?? null,
+          stripeId: c.stripeId ?? null,
+          shopifyId: c.shopifyId ?? null,
+          salesforceId: c.salesforceId ?? null,
+          attributes: c.attributes ?? {},
+        })
+        .onConflictDoUpdate({
+          target: customers.email,
+          set: {
+            name: c.name ?? null,
+            stripeId: c.stripeId ?? null,
+            shopifyId: c.shopifyId ?? null,
+            salesforceId: c.salesforceId ?? null,
+            attributes: c.attributes ?? {},
+            updatedAt: new Date(),
+          },
+        })
+      processed++
+    } catch (err) {
+      errors.push({ message: err instanceof Error ? err.message : String(err), record: c })
+    }
+  }
+  return { processed, errors }
+}
+
+async function resolveCustomerIds(batch: UnifiedTransaction[]): Promise<Map<string, string>> {
+  const emails = [
+    ...new Set(batch.filter((t) => !t.customerId && t.customerEmail).map((t) => t.customerEmail!)),
+  ]
+  if (emails.length === 0) return new Map()
+
+  const rows = await db
+    .select({ id: customers.id, email: customers.email })
     .from(customers)
-    .where(eq(customers.email, t.customerEmail))
-    .limit(1)
+    .where(inArray(customers.email, emails))
 
-  return customer?.id ?? null
+  return new Map(rows.map((r) => [r.email, r.id]))
 }
 
-async function upsertTransaction(t: UnifiedTransaction): Promise<void> {
-  const customerId = await resolveCustomerId(t)
+async function upsertTransactions(batch: UnifiedTransaction[]): Promise<BatchOutcome> {
+  if (batch.length === 0) return { processed: 0, errors: [] }
 
-  await db
-    .insert(transactions)
-    .values({
-      customerId,
-      sourcePlatform: t.sourcePlatform,
-      sourceTransactionId: t.sourceTransactionId,
-      amount: t.amount,
-      currency: t.currency,
-      status: t.status,
-      transactionDate: t.transactionDate,
-      rawPayload: t.rawPayload ?? {},
-    })
-    .onConflictDoUpdate({
-      target: [transactions.sourcePlatform, transactions.sourceTransactionId],
-      set: {
-        customerId,
-        amount: t.amount,
-        currency: t.currency,
-        status: t.status,
-        transactionDate: t.transactionDate,
-        rawPayload: t.rawPayload ?? {},
-      },
-    })
+  const emailToId = await resolveCustomerIds(batch)
+  const resolved = batch.map((t) => ({
+    txn: t,
+    customerId: t.customerId ?? (t.customerEmail ? (emailToId.get(t.customerEmail) ?? null) : null),
+  }))
+
+  try {
+    await db
+      .insert(transactions)
+      .values(
+        resolved.map(({ txn, customerId }) => ({
+          customerId,
+          sourcePlatform: txn.sourcePlatform,
+          sourceTransactionId: txn.sourceTransactionId,
+          amount: txn.amount,
+          currency: txn.currency,
+          status: txn.status,
+          transactionDate: txn.transactionDate,
+          rawPayload: txn.rawPayload ?? {},
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [transactions.sourcePlatform, transactions.sourceTransactionId],
+        set: {
+          customerId: sql`excluded.customer_id`,
+          amount: sql`excluded.amount`,
+          currency: sql`excluded.currency`,
+          status: sql`excluded.status`,
+          transactionDate: sql`excluded.transaction_date`,
+          rawPayload: sql`excluded.raw_payload`,
+        },
+      })
+    return { processed: batch.length, errors: [] }
+  } catch {
+    // Bulk statement failed (e.g. one bad row) — fall back to per-row so good rows still land.
+    return upsertTransactionsOneByOne(resolved)
+  }
+}
+
+async function upsertTransactionsOneByOne(
+  resolved: { txn: UnifiedTransaction; customerId: string | null }[]
+): Promise<BatchOutcome> {
+  let processed = 0
+  const errors: Array<{ message: string; record?: unknown }> = []
+  for (const { txn, customerId } of resolved) {
+    try {
+      await db
+        .insert(transactions)
+        .values({
+          customerId,
+          sourcePlatform: txn.sourcePlatform,
+          sourceTransactionId: txn.sourceTransactionId,
+          amount: txn.amount,
+          currency: txn.currency,
+          status: txn.status,
+          transactionDate: txn.transactionDate,
+          rawPayload: txn.rawPayload ?? {},
+        })
+        .onConflictDoUpdate({
+          target: [transactions.sourcePlatform, transactions.sourceTransactionId],
+          set: {
+            customerId,
+            amount: txn.amount,
+            currency: txn.currency,
+            status: txn.status,
+            transactionDate: txn.transactionDate,
+            rawPayload: txn.rawPayload ?? {},
+          },
+        })
+      processed++
+    } catch (err) {
+      errors.push({ message: err instanceof Error ? err.message : String(err), record: txn })
+    }
+  }
+  return { processed, errors }
 }

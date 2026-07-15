@@ -1,9 +1,32 @@
-import { pgTable, uuid, varchar, text, timestamp, integer, boolean, jsonb, numeric, pgEnum, unique } from 'drizzle-orm/pg-core'
+import {
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  timestamp,
+  integer,
+  boolean,
+  jsonb,
+  numeric,
+  pgEnum,
+  unique,
+} from 'drizzle-orm/pg-core'
 
 export const platformEnum = pgEnum('platform', ['stripe', 'shopify', 'salesforce', 'csv'])
 export const syncStatusEnum = pgEnum('sync_status', ['pending', 'running', 'completed', 'failed'])
-export const transactionStatusEnum = pgEnum('transaction_status', ['completed', 'pending', 'failed', 'refunded', 'cancelled'])
-export const alertMetricEnum = pgEnum('alert_metric', ['revenue_total', 'transaction_count', 'failed_transaction_rate', 'customer_count'])
+export const transactionStatusEnum = pgEnum('transaction_status', [
+  'completed',
+  'pending',
+  'failed',
+  'refunded',
+  'cancelled',
+])
+export const alertMetricEnum = pgEnum('alert_metric', [
+  'revenue_total',
+  'transaction_count',
+  'failed_transaction_rate',
+  'customer_count',
+])
 export const alertOperatorEnum = pgEnum('alert_operator', ['gt', 'lt', 'gte', 'lte', 'eq'])
 export const alertActionEnum = pgEnum('alert_action', ['email', 'slack'])
 
@@ -19,20 +42,22 @@ export const customers = pgTable('customers', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
 
-export const transactions = pgTable('transactions', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  customerId: uuid('customer_id').references(() => customers.id),
-  amount: integer('amount').notNull(),
-  currency: varchar('currency', { length: 3 }).notNull().default('usd'),
-  status: transactionStatusEnum('status').notNull(),
-  sourcePlatform: platformEnum('source_platform').notNull(),
-  sourceTransactionId: varchar('source_transaction_id', { length: 255 }).notNull(),
-  transactionDate: timestamp('transaction_date').notNull(),
-  rawPayload: jsonb('raw_payload').$type<Record<string, unknown>>(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (t) => [
-  unique('uniq_platform_txn').on(t.sourcePlatform, t.sourceTransactionId),
-])
+export const transactions = pgTable(
+  'transactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    customerId: uuid('customer_id').references(() => customers.id),
+    amount: integer('amount').notNull(),
+    currency: varchar('currency', { length: 3 }).notNull().default('usd'),
+    status: transactionStatusEnum('status').notNull(),
+    sourcePlatform: platformEnum('source_platform').notNull(),
+    sourceTransactionId: varchar('source_transaction_id', { length: 255 }).notNull(),
+    transactionDate: timestamp('transaction_date').notNull(),
+    rawPayload: jsonb('raw_payload').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [unique('uniq_platform_txn').on(t.sourcePlatform, t.sourceTransactionId)]
+)
 
 export const syncJobs = pgTable('sync_jobs', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -60,11 +85,29 @@ export const alertRules = pgTable('alert_rules', {
 
 export const alertTriggers = pgTable('alert_triggers', {
   id: uuid('id').primaryKey().defaultRandom(),
-  ruleId: uuid('rule_id').references(() => alertRules.id).notNull(),
+  ruleId: uuid('rule_id')
+    .references(() => alertRules.id)
+    .notNull(),
   triggeredAt: timestamp('triggered_at').defaultNow().notNull(),
   value: numeric('value', { precision: 15, scale: 2 }).notNull(),
   context: jsonb('context').$type<Record<string, unknown>>().default({}),
   resolvedAt: timestamp('resolved_at'),
+})
+
+export const csvUploads = pgTable('csv_uploads', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  syncJobId: uuid('sync_job_id')
+    .notNull()
+    .references(() => syncJobs.id, { onDelete: 'cascade' }),
+  filename: varchar('filename', { length: 255 }).notNull(),
+  headers: jsonb('headers').$type<string[]>().notNull().default([]),
+  totalRows: integer('total_rows').notNull().default(0),
+  errorRows: integer('error_rows').notNull().default(0),
+  sampleRows: jsonb('sample_rows').$type<Record<string, unknown>[]>().default([]),
+  sampleErrorRows: jsonb('sample_error_rows')
+    .$type<{ row: Record<string, unknown>; reason: string }[]>()
+    .default([]),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
 export type Customer = typeof customers.$inferSelect
@@ -74,8 +117,15 @@ export type NewTransaction = typeof transactions.$inferInsert
 export type SyncJob = typeof syncJobs.$inferSelect
 export type AlertRule = typeof alertRules.$inferSelect
 export type AlertTrigger = typeof alertTriggers.$inferSelect
+export type CsvUpload = typeof csvUploads.$inferSelect
 
-export const pipelineStepStatusEnum = pgEnum('pipeline_step_status', ['pending', 'running', 'completed', 'failed', 'skipped'])
+export const pipelineStepStatusEnum = pgEnum('pipeline_step_status', [
+  'pending',
+  'running',
+  'completed',
+  'failed',
+  'skipped',
+])
 
 export const pipelines = pgTable('pipelines', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -88,7 +138,9 @@ export const pipelines = pgTable('pipelines', {
 
 export const pipelineRuns = pgTable('pipeline_runs', {
   id: uuid('id').defaultRandom().primaryKey(),
-  pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id, { onDelete: 'cascade' }),
+  pipelineId: uuid('pipeline_id')
+    .notNull()
+    .references(() => pipelines.id, { onDelete: 'cascade' }),
   status: syncStatusEnum('status').notNull().default('pending'),
   startedAt: timestamp('started_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
@@ -97,7 +149,9 @@ export const pipelineRuns = pgTable('pipeline_runs', {
 
 export const pipelineSteps = pgTable('pipeline_steps', {
   id: uuid('id').defaultRandom().primaryKey(),
-  runId: uuid('run_id').notNull().references(() => pipelineRuns.id, { onDelete: 'cascade' }),
+  runId: uuid('run_id')
+    .notNull()
+    .references(() => pipelineRuns.id, { onDelete: 'cascade' }),
   nodeId: varchar('node_id', { length: 100 }).notNull(),
   nodeType: varchar('node_type', { length: 50 }).notNull(),
   status: pipelineStepStatusEnum('status').notNull().default('pending'),
@@ -109,7 +163,9 @@ export const pipelineSteps = pgTable('pipeline_steps', {
 
 export const transformRules = pgTable('transform_rules', {
   id: uuid('id').defaultRandom().primaryKey(),
-  pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id, { onDelete: 'cascade' }),
+  pipelineId: uuid('pipeline_id')
+    .notNull()
+    .references(() => pipelines.id, { onDelete: 'cascade' }),
   nodeId: varchar('node_id', { length: 100 }).notNull(),
   ruleType: varchar('rule_type', { length: 50 }).notNull(),
   config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
@@ -118,7 +174,9 @@ export const transformRules = pgTable('transform_rules', {
 
 export const pipelineOutputs = pgTable('pipeline_outputs', {
   id: uuid('id').defaultRandom().primaryKey(),
-  runId: uuid('run_id').notNull().references(() => pipelineRuns.id, { onDelete: 'cascade' }),
+  runId: uuid('run_id')
+    .notNull()
+    .references(() => pipelineRuns.id, { onDelete: 'cascade' }),
   nodeId: varchar('node_id', { length: 100 }).notNull(),
   row: jsonb('row').$type<Record<string, unknown>>().notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),

@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     .values({ sourcePlatform: 'csv', status: 'pending' })
     .returning()
 
-  runSync(job.id, 'csv', { csvContent: content }).catch((err) =>
+  runSync(job.id, 'csv', { csvContent: content, filename: file.name }).catch((err) =>
     console.error(`[csv-upload] Job ${job.id} failed:`, err)
   )
 

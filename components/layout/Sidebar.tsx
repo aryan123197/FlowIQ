@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, GitBranch, Bell, FileDown } from 'lucide-react'
+import { BarChart3, GitBranch, Bell, FileDown, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/pipelines', label: 'Pipelines', icon: GitBranch },
   { href: '/alerts', label: 'Alerts', icon: Bell },
   { href: '/reports', label: 'Reports', icon: FileDown },
+  { href: '/nlsql', label: 'Ask Your Data', icon: Sparkles },
 ]
 
 export function Sidebar() {
@@ -27,7 +28,9 @@ export function Sidebar() {
               href={href}
               className={cn(
                 'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                active ? 'bg-zinc-100 text-zinc-900' : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900'
+                active
+                  ? 'bg-zinc-100 text-zinc-900'
+                  : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900'
               )}
             >
               <Icon className="h-4 w-4" />

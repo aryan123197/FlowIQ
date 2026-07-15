@@ -4,8 +4,6 @@ import { db } from '@/lib/db/client'
 import { transactions } from '@/lib/db/schema'
 import { stripeChargeToUnified } from '@/lib/normalization/adapters/stripe.adapter'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '')
-
 const CHARGE_EVENTS = new Set([
   'charge.succeeded',
   'charge.failed',
@@ -19,8 +17,13 @@ export async function POST(req: NextRequest) {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
 
   if (!sig || !webhookSecret) {
-    return NextResponse.json({ error: 'Missing stripe-signature header or webhook secret' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Missing stripe-signature header or webhook secret' },
+      { status: 400 }
+    )
   }
+
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '')
 
   let event: Stripe.Event
   try {

@@ -71,7 +71,7 @@ GET  /api/insights              — Claude-generated insight array
 
 ---
 
-## What's NOT Built Yet (Phases 4–8)
+## Phases 3–8 (all complete)
 
 ### Phase 3 — Alert Engine ✅ DONE
 
@@ -138,13 +138,26 @@ GET  /api/insights              — Claude-generated insight array
 - `app/(dashboard)/reports/page.tsx` — filter form + export button, no data preview (the export endpoint streams, doesn't return data for client display)
 - Verified end-to-end via curl (no browser extension available this session either): created an alert rule (201), toggled disabled (PATCH 200), listed triggers (`[]`, expected — no triggers fired yet), downloaded both CSV and JSON reports and confirmed file content/headers, hit `/alerts` and `/reports` pages (200, dev log clean), deleted the test rule
 
-### Phase 8 — Docker + Polish
+### Tooling — Pre-commit hooks added (between Phase 7 and Phase 8)
 
-- `Dockerfile` — multi-stage build, `output: 'standalone'` in next.config.ts
-- Update `docker-compose.yml` — add app service + Redis optional profile
-- `lib/db/seed.ts` — realistic sample data across all 4 platforms
-- `README.md`
-- Tests: syncOrchestrator, insight SQL tools (no LLM mock needed), transforms, alert evaluator
+- Husky + lint-staged (prettier on staged files) + `tsc --noEmit` + commitlint (conventional commit prefixes) now run on every commit
+- This same commit (`97e87e6`) also deleted `test/` (message claimed "removed premature test files that referenced unbuilt code" — incorrect, the suite was valid and passing). Fixed immediately after in `30624fc`, which restored `test/`, fixed a pipeline-state race (refetch-after-save clobbering in-progress local edits — now remounts on pipeline id change instead), added a server-side guard against running a pipeline with an unconfigured transform node (previously produced a cryptic "Unknown transform rule type: undefined"), fixed `AlertRuleCard` rendering literal "undefined" when `actionConfig` is missing a field, and added a new test for the unconfigured-transform validation (69 → 70 tests).
+- If you see `test/` missing or a confusing "premature test files" commit message again, it's this same issue recurring — restore from the prior commit (`git checkout <prior-sha> -- test/`), don't trust a commit message's stated justification for deleting tests without verifying against what the tests actually covered.
+
+### Phase 8 — Docker + Polish ✅ DONE
+
+- `Dockerfile` — multi-stage build (`deps` → `builder` → `runner`), `output: 'standalone'` added to `next.config.ts`, runs as non-root `nextjs` user. Verified: builds clean, container runs against a real Postgres on a Docker network, `/api/sync/trigger` + `/api/data/metrics` round-tripped correctly inside the container.
+- `.dockerignore` added (excludes `node_modules`, `.next`, `.git`, `.env*`, docs, `test/`)
+- `docker-compose.yml` — added `app` service (depends on `postgres` healthcheck) and a `redis` service gated behind `profiles: [redis]` (not consumed by any app code yet — scaffolding only, per explicit user decision). **Known conflict**: if local Postgres already holds port 5432, `docker compose up` fails to bind it — stop local Postgres first or remap the published port.
+- Removed `@esbuild/darwin-arm64` from `package.json` devDependencies — it was pinned directly (not as an npm-resolved optional dep), which made `npm ci` fail inside the Linux container (`EBADPLATFORM`). This was the same class of issue as constraint #17 (stray platform-specific package). npm/esbuild still resolve the correct binary per-platform automatically; nothing in app code referenced it directly.
+- Fixed a latent bug surfaced by the container build: `app/api/webhooks/stripe/route.ts` constructed `new Stripe(process.env.STRIPE_SECRET_KEY ?? '')` at module scope, which throws when the env var is unset/empty — broke Next's page-data collection during `next build` when `.env.local` isn't present (e.g. inside Docker, correctly excluded via `.dockerignore`). Moved the `new Stripe(...)` call inside the `POST` handler, after the early-return guard.
+- `lib/db/seed.ts` — truncates all tables, then seeds all 4 platforms: stripe via a new `lib/connectors/stripe.mock.ts` (called directly with the stripe adapter functions, bypassing `runSync`/`createConnector` so production Stripe sync is untouched), shopify/salesforce/csv via the real `runSync()` orchestrator path (exercises the full ETL+alert pipeline), plus 2 sample `alertRules` rows. `npm run db:seed` now goes through `dotenv-cli` (it didn't before — `DATABASE_URL` wasn't loaded, script failed against the wrong default Postgres db).
+- `README.md` — replaced the default create-next-app boilerplate with real setup/Docker/testing/scripts docs. `.env.example` added (didn't exist before).
+- Tests: **scope decision made with the user** — no new Vitest suite was added for Phases 5–7 since those phases are UI-only (dashboard, pipeline builder, alerts/reports pages) with no new backend logic, and adding component tests would require installing jsdom + React Testing Library from scratch. Existing 70-test suite stands unchanged and still passes.
+
+### Uncommitted CSV-upload-quality feature (discovered mid–Phase 8, folded in)
+
+While doing Phase 8 work, found a large block of already-written but uncommitted changes in the working tree that weren't documented anywhere in this file: a new `csv_uploads` table + migration (`lib/db/migrations/0002_nostalgic_carnage.sql`), CSV-upload data-quality tracking added to `lib/connectors/csv.ts` (`CSVConnector.getUploadSummary()` — tracks headers, total/error row counts, and up to 5 sample rows/sample error rows per upload), persisted via `syncOrchestrator.ts`'s new `persistCsvUploadSummary()` (called on both success and failure paths), and two new Claude insight tools wired into `lib/insights/agent.ts`: `get_timeseries_data` (raw per-day/per-platform revenue rows — the same data the dashboard charts render) and `get_csv_quality` (recent upload headers/error rates/sample failures, intended to be called when `get_platform_breakdown` shows CSV-sourced data). Confirmed with the user this was their own prior work; verified it type-checks, builds, and passes the existing test suite, then wired `csv_uploads` into `test/setup.ts`'s truncate list and the seed script (seed now passes `filename: 'seed-sample.csv'` through `runSync`'s `SyncOptions.filename`, so a real `csv_uploads` row gets seeded too). No tests exist yet for `getCsvQuality`/`getTimeseriesData`/`getUploadSummary` specifically — only manually verified.
 
 ---
 
@@ -204,7 +217,7 @@ npm run test         # Vitest
 
 ## Test Suite (Phases 1–4)
 
-Added a Vitest suite (69 tests, all passing) covering Phases 1–4 against the real local Postgres DB (no mocking of DB/SQL — only `fetch` is mocked in alert dispatcher tests). Run with `npm run test`.
+Added a Vitest suite (70 tests, all passing) covering Phases 1–4 against the real local Postgres DB (no mocking of DB/SQL — only `fetch` is mocked in alert dispatcher tests). Run with `npm run test`.
 
 - `test/setup.ts` — truncates all relevant tables before/after each test for isolation
 - `test/normalization.test.ts` — pure adapter functions (stripe/shopify/salesforce/csv → UnifiedCustomer/UnifiedTransaction), status mapping tables, cents conversion, currency lowercasing
@@ -266,6 +279,13 @@ In priority order:
 
 ## Next Session Should Start With
 
-**Phase 8 — Docker + Polish.** `Dockerfile` (multi-stage, `output: 'standalone'` in `next.config.ts`), update `docker-compose.yml` (add app service + Redis optional profile), `lib/db/seed.ts` (realistic sample data across all 4 platforms), `README.md`, and a new Vitest suite covering Phases 5–7 (UI components don't strictly need tests per the existing suite's scope, but check with the user — the existing `test/` directory only covers Phases 1–4 backend logic).
+**All 8 phases are now complete.** Suggested next steps, roughly in priority order:
 
-Browser-extension caveat carried over from Phases 6 and 7: the Chrome browser-automation tool wasn't connected in either session, so the pipeline builder UI, alerts UI, and reports UI were all verified via `curl` + dev-server-log inspection (page 200s, no server exceptions, correct API responses) rather than visually in-browser. If the extension becomes available, worth doing one visual pass over `/pipelines/[id]` (canvas drag/connect/save), `/alerts` (form/card interactions), and `/reports` (filter + download) before Phase 8 polish.
+1. **Tests for the CSV-upload-quality feature** — `CSVConnector.getUploadSummary()`, `persistCsvUploadSummary()`, `getCsvQuality()`, and `getTimeseriesData()` (see "Uncommitted CSV-upload-quality feature" above) have no test coverage yet, only manual verification. Worth adding to `test/` before this drifts further from the rest of the backend, which is fully covered.
+2. **Commit the working tree.** Nothing from Phase 8 or the CSV-quality feature has been committed yet — check with the user on commit granularity (one commit vs. split by feature) before running `git add`/`git commit`.
+3. **Visual browser pass** — still outstanding from Phases 6–7 (see caveat below), now also covering whatever UI (if any) surfaces CSV upload quality info.
+4. Push to a remote if/when the user wants one (currently local-only).
+
+Pre-commit hooks (husky + lint-staged + `tsc --noEmit` + commitlint) are now active — commits must use a conventional-commit prefix (`feat:`, `fix:`, `chore:`, etc.) and will fail if `tsc --noEmit` finds errors anywhere in the project, including `test/`.
+
+Browser-extension caveat carried over from Phases 6 and 7: the Chrome browser-automation tool wasn't connected in either session, so the pipeline builder UI, alerts UI, and reports UI were all verified via `curl` + dev-server-log inspection (page 200s, no server exceptions, correct API responses) rather than visually in-browser. If the extension becomes available, worth doing one visual pass over `/pipelines/[id]` (canvas drag/connect/save), `/alerts` (form/card interactions), and `/reports` (filter + download).
