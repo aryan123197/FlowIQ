@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { DollarSign, ArrowLeftRight, TrendingUp, AlertTriangle, Users } from 'lucide-react'
 import { KpiCard } from '@/components/analytics/KpiCard'
 import { RevenueChart } from '@/components/analytics/RevenueChart'
 import { PlatformDonut } from '@/components/analytics/PlatformDonut'
@@ -57,41 +58,87 @@ export default function AnalyticsPage() {
     },
   })
 
+  const now = new Date().toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-zinc-900">Analytics</h1>
+    <div className="flex flex-col gap-8">
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Analytics</h1>
+          <p className="mt-0.5 text-sm text-slate-400">Last refreshed {now}</p>
+        </div>
         <DateRangePicker value={range} onChange={setRange} />
       </div>
 
       {(metricsError || timeseriesError) && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-600">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
           Failed to load analytics data.
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="Total Revenue" value={`$${((metrics?.totalRevenue ?? 0) / 100).toFixed(2)}`} />
-        <KpiCard title="Transactions" value={String(metrics?.transactionCount ?? 0)} />
-        <KpiCard title="Avg Transaction" value={`$${((metrics?.avgTransactionValue ?? 0) / 100).toFixed(2)}`} />
-        <KpiCard
-          title="Failed Rate"
-          value={`${((metrics?.failedTransactionRate ?? 0) * 100).toFixed(1)}%`}
-        />
+      {/* KPI row */}
+      <div>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Overview
+        </h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard
+            title="Total Revenue"
+            value={`$${((metrics?.totalRevenue ?? 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            icon={DollarSign}
+            accent="indigo"
+          />
+          <KpiCard
+            title="Transactions"
+            value={String(metrics?.transactionCount ?? 0)}
+            icon={ArrowLeftRight}
+            accent="violet"
+          />
+          <KpiCard
+            title="Avg Transaction"
+            value={`$${((metrics?.avgTransactionValue ?? 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            icon={TrendingUp}
+            accent="emerald"
+          />
+          <KpiCard
+            title="Failed Rate"
+            value={`${((metrics?.failedTransactionRate ?? 0) * 100).toFixed(1)}%`}
+            icon={AlertTriangle}
+            accent="rose"
+          />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <RevenueChart data={timeseries ?? []} />
+      {/* Charts */}
+      <div>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Revenue Trends
+        </h2>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <RevenueChart data={timeseries ?? []} />
+          </div>
+          <PlatformDonut data={metrics?.platformBreakdown ?? []} />
         </div>
-        <PlatformDonut data={metrics?.platformBreakdown ?? []} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <TransactionTable range={range} />
+      {/* Table + Insights */}
+      <div>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Transactions &amp; Insights
+        </h2>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <TransactionTable range={range} />
+          </div>
+          <InsightPanel />
         </div>
-        <InsightPanel />
       </div>
     </div>
   )

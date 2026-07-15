@@ -60,12 +60,12 @@ export function SyncStatusBanner() {
   return (
     <div className="flex items-center gap-2 text-sm">
       {ACTIVE_STATUSES.has(job.status ?? '') && <Spinner />}
-      <span className="text-zinc-500">
-        Last sync: <span className="font-medium text-zinc-900">{job.sourcePlatform}</span>
+      <span className="text-slate-400">
+        Last sync: <span className="font-semibold text-slate-700">{job.sourcePlatform}</span>
       </span>
       <StatusBadge status={job.status} />
       {job.status === 'running' && job.recordsProcessed !== undefined && (
-        <span className="text-zinc-400">{job.recordsProcessed} records</span>
+        <span className="text-slate-400">{job.recordsProcessed} records</span>
       )}
     </div>
   )

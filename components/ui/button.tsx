@@ -3,13 +3,14 @@ import { cn } from '@/lib/utils'
 import { forwardRef } from 'react'
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none',
+  'inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none',
   {
     variants: {
       variant: {
-        default: 'bg-zinc-900 text-white hover:bg-zinc-700',
-        outline: 'border border-zinc-300 bg-white hover:bg-zinc-50 text-zinc-900',
-        ghost: 'hover:bg-zinc-100 text-zinc-900',
+        default: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm',
+        outline: 'border border-slate-200 bg-white hover:bg-slate-50 text-slate-700',
+        ghost: 'hover:bg-slate-100 text-slate-700',
+        danger: 'bg-rose-600 text-white hover:bg-rose-700',
       },
       size: {
         default: 'h-9 px-4',
@@ -25,8 +26,7 @@ const buttonVariants = cva(
 )
 
 export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {}
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, ...props }, ref) => (
